@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# SessionStart: tells herdr which Claude session runs in this terminal, so its
+# sub-agents can be listed under it. Never blocks or fails the session start.
+SUBAGENTS_LABEL="claude_subagents"
+
+# A claude started from inside another one inherits HC_TERMINAL_ID; only the
+# terminal's own program may label it: walking up from the hook, the terminal's
+# program must come before any other claude.
+is_terminal_program() {
+  local foreground_pid pid
+  foreground_pid="$(herdr-core get "$HC_TERMINAL_ID" --json 2>/dev/null | jq -r '.foreground.pid // empty' 2>/dev/null)"
+  if [ -z "$foreground_pid" ]; then
+    return 1
+  fi
+  pid="$PPID"
+  while [ -n "$pid" ] && [ "$pid" -gt 1 ]; do
+    if [ "$pid" = "$foreground_pid" ]; then
+      return 0
+    fi
+    if [ "$(ps -o comm= -p "$pid" 2>/dev/null)" = "claude" ]; then
+      return 1
+    fi
+    pid="$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')"
+  done
+  return 1
+}
+
+if [ -z "${HC_TERMINAL_ID:-}" ]; then
+  exit 0
+fi
+
+transcript_path="$(jq -r '.transcript_path // empty' 2>/dev/null)"
+if [ -z "$transcript_path" ]; then
+  exit 0
+fi
+
+if ! is_terminal_program; then
+  exit 0
+fi
+
+subagents_dir="${transcript_path%.jsonl}/subagents"
+herdr-core label "$HC_TERMINAL_ID" "$SUBAGENTS_LABEL=$subagents_dir" >/dev/null 2>&1
+exit 0
