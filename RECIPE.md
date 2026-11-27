@@ -23,7 +23,8 @@ Added under each Claude Code agent row:
     bottom-left (`├` / `└`).
   - The parent's program icon at 14 px (the Claude icon).
   - The name in `muted`, truncated: `<description> · <model>`, e.g.
-    `Review tasks.ts edge cases · haiku`; just the description without a
+    `Review tasks.ts edge cases · haiku`, with a full model id cut to its
+    family (`claude-opus-5-5` → `opus`); just the description without a
     model; the agent type (`Explore`, `general-purpose`) without a
     description.
   - At the right, the `working` spinner: 12 px, one turn every 900 ms.
@@ -32,8 +33,16 @@ Added under each Claude Code agent row:
 
 ## How it behaves
 
-- **Which sub-agents**: every 3 s, for each live terminal with a
-  `claude_subagents` label, the panel lists `agent-*.jsonl` in that folder
+- **Which sessions**: a live terminal with a `claude_subagents` label uses
+  that folder. A live local terminal running `claude` without the label
+  (started before the hook was installed, or no hook) is looked up instead:
+  `~/.claude/sessions/<foreground pid>.json` gives its `sessionId`, and
+  `find ~/.claude/projects -mindepth 2 -maxdepth 2 -name <sessionId>.jsonl`
+  its transcript; the folder is `<transcript without .jsonl>/subagents`.
+  The record is read every poll, so `/clear` and `/resume` are followed;
+  the transcript is searched for once per session. The label is never
+  written back.
+- **Which sub-agents**: every 3 s, for each of those folders, the panel lists `agent-*.jsonl` in that folder
   modified in the last 30 minutes and reads the `agent-<id>.meta.json` next
   to each. A sub-agent shows while its meta has no `finished: true`; a
   missing or half-written meta hides it until the next poll.
@@ -58,8 +67,9 @@ Added under each Claude Code agent row:
   the sub-agent poll), `claude-subagents.js` (label name, transcript name
   parser, meta parser, meta → virtual terminal rows), tests. `mod.json`:
   `"place": "none"`, `"title": "Agents"`, `cloned_from` `agents` 0.1.18.
-- Changes to the shipped `main.js`: import `exec` and `readFile` from
-  `fs/promises`; `loadSubagents()`; `refreshSubagents()` started in `init`
+- Changes to the shipped `main.js`: import `exec`, `home`,
+  `readTextFile` and `readFile` from `fs/promises`; `lookUpSubagentsDir()`,
+  `loadSubagents()`; `refreshSubagents()` started in `init`
   and every 3 s with `cx.timer.every`; `const all = [...terminals(),
   ...this.subagents]`; sub-agent rows with `virtual: true` ignore clicks;
   the sort popup opens `mod: "agents-subagents"`.
@@ -69,7 +79,8 @@ Added under each Claude Code agent row:
   draws it like any sub-agent.
 - `herdr`: `agents`, `terminals`, `panes`, `focused`, `spaces`, `run`,
   `theme`, `shared`/`setShared`, `setAgentOrder`, `openOverlay`/
-  `closeOverlay`, `props`, `window`, `layout`, `exec`. Icons from the
+  `closeOverlay`, `props`, `window`, `layout`, `exec`, `home`,
+  `readTextFile`. Icons from the
   shipped `mods/workspace-chrome/`.
 - Programs: `find` (mod); `herdr-core get`/`label`, `jq`, `ps` (hook).
 - `claude-code/hooks/herdr-label-claude-session`: the Claude Code
@@ -78,11 +89,15 @@ Added under each Claude Code agent row:
 
 ## Watch out
 
-- Without the hook nothing changes: the panel is the shipped `agents`.
-  Sessions already running when the hook is installed are not labelled.
-- It reads Claude Code's own files (`<session>/subagents/agent-<id>.jsonl`
-  and `.meta.json` with `agentType`, `description`, `model`, `finished`).
-  That layout is not a public API; a Claude Code update can change it.
+- The hook is optional: without it, sessions are found through their
+  process record. That needs the terminal's foreground process to be
+  `claude` itself (not a wrapper script or `npx`) and Claude Code's files
+  under `~/.claude` (not `CLAUDE_CONFIG_DIR`); otherwise only the hook
+  works. Terminals on other machines need the hook too.
+- It reads Claude Code's own files (`~/.claude/sessions/<pid>.json` with
+  `sessionId`, `<session>/subagents/agent-<id>.jsonl` and `.meta.json`
+  with `agentType`, `description`, `model`, `finished`). That layout is not
+  a public API; a Claude Code update can change it.
 - A sub-agent whose turn ends while its background shells keep running is
   `finished` and leaves the list, even if Claude Code still shows it
   waiting.
@@ -96,6 +111,8 @@ Added under each Claude Code agent row:
   `mods/agents-subagents/test/*.test.js` passes and
   `claude-code/hooks/tests/herdr-label-claude-session.test.sh` prints only
   `PASS` lines.
+- Without the hook, a Claude session already running in Herdr that
+  launches a background sub-agent shows it within 3 s.
 - With the hook installed, a new Claude session in Herdr has the
   `claude_subagents` label (`herdr-core get <t> --json`).
 - Asking that Claude to launch two background sub-agents shows two rows

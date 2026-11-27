@@ -2,12 +2,14 @@
 
 import { View, div, image, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { agents, terminals, panes, focused, spaces, run, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, window, layout, exec } from "herdr";
+import { agents, terminals, panes, focused, spaces, run, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, window, layout, exec, home, readTextFile } from "herdr";
 import { readFile } from "fs/promises";
-import { SUBAGENTS_LABEL, STALE_MINUTES, subagentIdFromTranscript, parseMeta, subagentTerminals } from "./claude-subagents.js";
+import { SUBAGENTS_LABEL, STALE_MINUTES, subagentIdFromTranscript, parseMeta, subagentTerminals, needsSessionLookup, sessionIdFromRecord, subagentsDirOfTranscript } from "./claude-subagents.js";
 
 const SUBAGENTS_POLL_MS = 3000;
 const FIND_TIMEOUT_MS = 2000;
+// A session's transcript stays where it was found, so each session is searched for once.
+const subagentsDirBySessionId = new Map();
 
 // A sub-agent whose record is missing or still being written is simply not shown yet.
 async function readMetaText(dir, id) {
@@ -18,9 +20,30 @@ async function readMetaText(dir, id) {
   }
 }
 
+// No session yet, or a transcript not written yet: null, and the next poll tries again.
+async function lookUpSubagentsDir(terminal) {
+  const record = await readTextFile(`${home()}/.claude/sessions/${terminal.foreground.pid}.json`);
+  const sessionId = sessionIdFromRecord(record);
+  if (!sessionId) {
+    return null;
+  }
+  if (!subagentsDirBySessionId.has(sessionId)) {
+    const found = await exec("find", [`${home()}/.claude/projects`, "-mindepth", "2", "-maxdepth", "2", "-name", `${sessionId}.jsonl`], { timeout: FIND_TIMEOUT_MS });
+    const dir = subagentsDirOfTranscript(found.stdout);
+    if (!dir) {
+      return null;
+    }
+    subagentsDirBySessionId.set(sessionId, dir);
+  }
+  return subagentsDirBySessionId.get(sessionId);
+}
+
 // Recently active sub-agents of one Claude terminal; none when its folder doesn't exist yet.
 async function loadSubagents(terminal) {
-  const dir = terminal.labels[SUBAGENTS_LABEL];
+  const dir = terminal.labels?.[SUBAGENTS_LABEL] ?? await lookUpSubagentsDir(terminal);
+  if (!dir) {
+    return [];
+  }
   const found = await exec("find", [dir, "-maxdepth", "1", "-name", "agent-*.jsonl", "-mmin", `-${STALE_MINUTES}`], { timeout: FIND_TIMEOUT_MS });
   if (found.code !== 0) {
     return [];
@@ -132,7 +155,7 @@ export default class Agents extends View {
     this.refreshingSubagents = true;
     cx.spawn(async (cx) => {
       try {
-        const claudes = terminals().filter((t) => t.state === "live" && t.labels?.[SUBAGENTS_LABEL]);
+        const claudes = terminals().filter((t) => t.state === "live" && (t.labels?.[SUBAGENTS_LABEL] || needsSessionLookup(t)));
         const subagents = (await Promise.all(claudes.map(loadSubagents))).flat();
         if (JSON.stringify(subagents) !== JSON.stringify(this.subagents)) {
           this.subagents = subagents;
