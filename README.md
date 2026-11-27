@@ -8,8 +8,10 @@ their description and model.
 
 ## Install
 
-It has two parts: the mod, and a Claude Code `SessionStart` hook that tells
-Herdr where each session keeps its sub-agents.
+It has two parts: the mod, and an optional Claude Code `SessionStart` hook
+that tells Herdr where each session keeps its sub-agents. Without the hook,
+the mod finds each session from Claude Code's process record; the hook
+covers the cases where that can't work (see RECIPE.md, Watch out).
 
 1. Ask your agent in Herdr:
 
@@ -18,7 +20,7 @@ Herdr where each session keeps its sub-agents.
    Then put `agents-subagents` in your layout's Agents panel in place of
    `agents`.
 
-2. Install the hook (needs `jq`):
+2. Optionally, install the hook (needs `jq`):
 
    ```sh
    mkdir -p ~/.claude/hooks
@@ -38,11 +40,12 @@ Herdr where each session keeps its sub-agents.
    }
    ```
 
-   Sessions started after that show their sub-agents.
+   Sessions started after that are labelled by the hook.
 
 What it touches: the hook runs `herdr-core label` on the session's own
 terminal. The mod runs `find` every 3 s and reads the `agent-*.meta.json`
-files in the session folders under `~/.claude/projects/`. No network calls.
+files in the session folders under `~/.claude/projects/`; for Claude
+terminals without the label it also reads `~/.claude/sessions/<pid>.json`. No network calls.
 
 ## Develop
 
